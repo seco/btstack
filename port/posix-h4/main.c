@@ -66,6 +66,12 @@
 #include "btstack_chipset_stlc2500d.h"
 #include "btstack_chipset_tc3566x.h"
 
+#define HAVE_DA14581
+
+#ifdef HAVE_DA14581
+#include "hci_581_active_uart.h"
+#endif
+
 int is_bcm;
 
 int btstack_main(int argc, const char * argv[]);
@@ -188,6 +194,251 @@ static void local_version_information_callback(uint8_t * packet){
     }
 }
 
+#ifdef HAVE_DA14581
+
+#include <unistd.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <termios.h>  /* POSIX terminal control definitions */
+
+//
+#define SOH         0x01
+#define STX         0x02
+#define ACK         0x06
+#define NACK        0x15
+#define CRC_INIT    0x00
+
+static int safe_write(int fd, const void* buf, size_t len)
+{
+    ssize_t n;
+
+    do {
+        n = write(fd, buf, len);
+        if (n > 0) {
+            // printf("Wrote %u from %u: ", (int) n, (int) len);
+            // printf_hexdump(buf, n);
+            len -= n;
+            buf += n;
+        } else if (n < 0  &&  (errno != EINTR && errno != EAGAIN))
+            return -1;
+    } while (len);
+
+    return 0;
+}
+
+static int send_file(int ser_fd, int file_fd, int file_size, uint8_t* file_crc)
+{
+    uint8_t fcrc = CRC_INIT;
+    int n, pos;
+
+    for (pos = 0; pos < file_size; ) {
+        // printf("send pos %u\n", pos);
+#define FBUF_SIZE 4096
+        uint8_t buf[FBUF_SIZE];
+        int i, count;
+
+        /* read a chunk */
+        count = file_size - pos;
+        if (count > FBUF_SIZE)
+            count = FBUF_SIZE;
+        n = read(file_fd, buf, count);
+        if (-1 == n) {
+            if (errno != EINTR) {
+                perror("reading from file");
+                return -1;
+            } else
+                continue;
+        }
+
+        /* update crc */
+        for (i = 0; i < n; i++)
+            fcrc ^= buf[i];
+
+        /* write chunk */
+        if (safe_write(ser_fd, buf, n) < 0) {
+            perror("writing to serial port");
+            return -1;
+        }
+
+        pos += n;
+    }
+
+    *file_crc = fcrc;
+    return 0;
+}
+
+static int dialog_download_hci_firmware(int fd)
+{
+    struct stat sbuf;
+    const char fw_fname[] = "hci-firmware.bin";
+    int cnt = 0, fw = -1, fw_size, res = -1, done = 0, download_state = 0;
+    int read_from_serial = 1;
+
+    /* open firmware file and get its size */
+    fw = open(fw_fname, O_RDONLY);
+    if (-1 == fw) {
+        perror(fw_fname);
+        exit(EXIT_FAILURE);
+    }
+    if (fstat(fw, &sbuf)) {
+        perror(fw_fname);
+        goto cleanup_and_exit;
+    }
+    fw_size = sbuf.st_size;
+
+    printf("Downloading %s...\n", fw_fname);
+    uint8_t b = 0, fw_crc = 0;
+
+    while (!done) {
+
+        if (read_from_serial && read(fd, &b, 1) < 0) {
+            if (errno == EAGAIN) continue;
+
+            perror("Reading from serial port");
+            continue;
+            // goto cleanup_and_exit;
+        }
+
+        // printf("State %u, read 0x%02x\n", download_state, b);
+        switch (download_state)
+        {
+            case 0:
+                if (STX == b) {
+                    uint8_t buf[3];
+
+                    buf[0] = SOH;
+                    buf[1] = fw_size;
+                    buf[2] = (fw_size >> 8);
+                    if (safe_write(fd, buf, 3)) {
+                        perror("responding to STX");
+                        goto cleanup_and_exit;
+                    }
+                    download_state = 1;
+                }
+                break ;
+
+            case 1:
+                if (ACK == b) {
+                    download_state = 2;
+                    read_from_serial = 0;
+                } else if (NACK == b) {
+                    fprintf(stderr, "Received NACK.\n");
+                    done = 1;
+                } else {
+#if 0
+                    fprintf(stderr, "Received %02x while "
+                            "expecting ACK (%02x) "
+                            "or NACK (%02x).\n",
+                            b, ACK, NACK);
+#endif
+                    if (++cnt == 10) {
+                        printf("Restarting.\n");
+                        download_state = 0;
+                        cnt = 0;
+                    }
+                }
+                break ;
+
+            case 2:
+                read_from_serial = 1;
+                if (send_file(fd, fw, fw_size, &fw_crc))
+                    goto cleanup_and_exit;
+                download_state = 3;
+                break;
+
+            case 3:
+                if (fw_crc != b) {
+                    fprintf(stderr, "Received CRC %02x, "
+                            "which does not match "
+                            "computed CRC %02x.\n",
+                            b, fw_crc);
+                } else {
+                    printf("CRC OK (%02x).\n", b);
+                    b = ACK;
+                    if (safe_write(fd, &b, 1) < 0) {
+                        perror("sending final ACK");
+                        goto cleanup_and_exit;
+                    }
+                }
+                done = 1;
+                break;
+
+            default:
+                fprintf(stderr, "Unknown download_state=%d\n",
+                        download_state);
+                goto cleanup_and_exit;
+        }
+    }
+
+    res = 0;
+
+cleanup_and_exit:
+    if (fw != -1) {
+        if (close(fw))
+            perror(fw_fname);
+    }
+
+    return res;
+}
+
+int btstack_chipset_da14581_download_firmware(const char * device_name){
+
+    // open serial port
+    int flowcontrol = 1;
+
+    struct termios toptions;
+    int flags = O_RDWR | O_NOCTTY | O_NONBLOCK;
+    int fd = open(device_name, flags);
+    if (fd == -1)  {
+        log_error("posix_open: Unable to open port %s", device_name);
+        return -1;
+    }
+    
+    if (tcgetattr(fd, &toptions) < 0) {
+        log_error("posix_open: Couldn't get term attributes");
+        return -1;
+    }
+    
+    cfmakeraw(&toptions);   // make raw
+
+    // 8N1
+    toptions.c_cflag &= ~CSTOPB;
+    toptions.c_cflag |= CS8;
+    if (flowcontrol) {
+        // with flow control
+        toptions.c_cflag |= CRTSCTS;
+    } else {
+        // no flow control
+        toptions.c_cflag &= ~CRTSCTS;
+    }
+    
+    toptions.c_cflag |= CREAD | CLOCAL;  // turn on READ & ignore ctrl lines
+    toptions.c_iflag &= ~(IXON | IXOFF | IXANY); // turn off s/w flow ctrl
+    
+    // see: http://unixwiz.net/techtips/termios-vmin-vtime.html
+    toptions.c_cc[VMIN]  = 1;
+    toptions.c_cc[VTIME] = 0;
+    
+    speed_t brate = B57600;
+    cfsetospeed(&toptions, brate);
+    cfsetispeed(&toptions, brate);
+
+    if(tcsetattr(fd, TCSANOW, &toptions) < 0) {
+        log_error("posix_open: Couldn't set term attributes");
+        return -1;
+    }
+
+    tcflush(fd,TCIOFLUSH);
+    
+    dialog_download_hci_firmware(fd);
+
+    close(fd);
+
+    return 0;
+}
+#endif
+
 int main(int argc, const char * argv[]){
 
 	/// GET STARTED with BTstack ///
@@ -195,14 +446,18 @@ int main(int argc, const char * argv[]){
     btstack_run_loop_init(btstack_run_loop_posix_get_instance());
 	    
     // use logger: format HCI_DUMP_PACKETLOGGER, HCI_DUMP_BLUEZ or HCI_DUMP_STDOUT
-    hci_dump_open("/tmp/hci_dump.pklg", HCI_DUMP_PACKETLOGGER);
+    hci_dump_open("/tmp/hci_dump_da.pklg", HCI_DUMP_PACKETLOGGER);
 
     // pick serial port
-    config.device_name = "/dev/tty.usbserial-A9OVNX5P";
+    config.device_name = "/dev/tty.usbmodem1411";
+
+#ifdef HAVE_DA14581
+    btstack_chipset_da14581_download_firmware(config.device_name);
+#endif    
 
     // init HCI
     const btstack_uart_block_t * uart_driver = btstack_uart_block_posix_instance();
-	const hci_transport_t * transport = hci_transport_h4_instance(uart_driver);
+    const hci_transport_t * transport = hci_transport_h4_instance(uart_driver);
     const btstack_link_key_db_t * link_key_db = btstack_link_key_db_fs_instance();
 	hci_init(transport, (void*) &config);
     hci_set_link_key_db(link_key_db);

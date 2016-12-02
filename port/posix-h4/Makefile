@@ -16,6 +16,7 @@ CORE += \
 	le_device_db_fs.c \
 	main.c \
 	stdin_support.c \
+	hci_581_active_uart.c \
 #	bluetooth_init_cc2564_2.14.c \
 
 # TI-WL183x requires TIInit_11.8.32.c
@@ -38,6 +39,7 @@ CFLAGS  += -g -Wall -Werror \
 	-I$(BTSTACK_ROOT)/chipset/em9301 \
 	-I$(BTSTACK_ROOT)/chipset/stlc2500d \
 	-I$(BTSTACK_ROOT)/chipset/tc3566x \
+	-I$(BTSTACK_ROOT)/chipset/da14581 \
 
 VPATH += ${BTSTACK_ROOT}/platform/posix
 VPATH += ${BTSTACK_ROOT}/platform/embedded
@@ -48,6 +50,7 @@ VPATH += ${BTSTACK_ROOT}/chipset/csr
 VPATH += ${BTSTACK_ROOT}/chipset/em9301
 VPATH += ${BTSTACK_ROOT}/chipset/stlc2500d
 VPATH += ${BTSTACK_ROOT}/chipset/tc3566x
+VPATH += ${BTSTACK_ROOT}/chipset/da14581
 
 ifeq ($(OS),Windows_NT)
 LDFLAGS += -lws2_32
