@@ -584,7 +584,7 @@ static void stdin_process(btstack_data_source_t *ds, btstack_data_source_callbac
             remote_configuration.media_codec.media_type = AVDTP_AUDIO;
             remote_configuration.media_codec.media_codec_type = AVDTP_CODEC_SBC;
             remote_configuration.media_codec.media_codec_information_len = sizeof(media_sbc_codec_configuration);
-            remote_configuration.media_codec.media_codec_information = media_sbc_codec_configuration;
+            remote_configuration.media_codec.media_codec_information = (uint8_t*)media_sbc_codec_configuration;
             avdtp_sink_set_configuration(con_handle, local_stream_endpoint->sep.seid, sep.seid, remote_configuration_bitmap, remote_configuration);
             break;
         case 'R':
@@ -593,7 +593,7 @@ static void stdin_process(btstack_data_source_t *ds, btstack_data_source_callbac
             remote_configuration.media_codec.media_type = AVDTP_AUDIO;
             remote_configuration.media_codec.media_codec_type = AVDTP_CODEC_SBC;
             remote_configuration.media_codec.media_codec_information_len = sizeof(media_sbc_codec_reconfiguration);
-            remote_configuration.media_codec.media_codec_information = media_sbc_codec_reconfiguration;
+            remote_configuration.media_codec.media_codec_information = (uint8_t*)media_sbc_codec_reconfiguration;
             avdtp_sink_reconfigure(con_handle, sep.seid, remote_configuration_bitmap, remote_configuration);
             break;
         case 'o':
@@ -647,7 +647,7 @@ int btstack_main(int argc, const char * argv[]){
     local_stream_endpoint = avdtp_sink_create_stream_endpoint(AVDTP_SINK, AVDTP_AUDIO);
     local_stream_endpoint->sep.seid = 1;
     avdtp_sink_register_media_transport_category(local_stream_endpoint->sep.seid);
-    avdtp_sink_register_media_codec_category(local_stream_endpoint->sep.seid, AVDTP_AUDIO, AVDTP_CODEC_SBC, media_sbc_codec_capabilities, sizeof(media_sbc_codec_capabilities));
+    avdtp_sink_register_media_codec_category(local_stream_endpoint->sep.seid, AVDTP_AUDIO, AVDTP_CODEC_SBC,(uint8_t*) media_sbc_codec_capabilities, sizeof(media_sbc_codec_capabilities));
 //#endif
     // uint8_t cp_type_lsb,  uint8_t cp_type_msb, const uint8_t * cp_type_value, uint8_t cp_type_value_len
     // avdtp_sink_register_content_protection_category(seid, 2, 2, NULL, 0);

@@ -120,7 +120,7 @@ void avdtp_register_header_compression_category(avdtp_stream_endpoint_t * stream
     stream_endpoint->sep.capabilities.header_compression.recovery = recovery;
 }
 
-void avdtp_register_media_codec_category(avdtp_stream_endpoint_t * stream_endpoint, avdtp_media_type_t media_type, avdtp_media_codec_type_t media_codec_type, const uint8_t * media_codec_info, uint16_t media_codec_info_len){
+void avdtp_register_media_codec_category(avdtp_stream_endpoint_t * stream_endpoint, avdtp_media_type_t media_type, avdtp_media_codec_type_t media_codec_type, uint8_t * media_codec_info, uint16_t media_codec_info_len){
     if (!stream_endpoint){
         log_error("avdtp_register_media_transport_category: stream endpoint with given seid is not registered");
         return;
