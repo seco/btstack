@@ -50,6 +50,30 @@ inline uint8_t avdtp_header(uint8_t tr_label, avdtp_packet_type_t packet_type, a
     return (tr_label<<4) | ((uint8_t)packet_type<<2) | (uint8_t)msg_type;
 }
 
+int avdtp_setup_media_packet_header(uint8_t * media_packet, uint32_t timestamp, uint16_t sequence_number, uint8_t marker){
+    const uint8_t  rtp_version = 2;
+    const uint8_t  padding = 0;
+    const uint8_t  extension = 0;
+    const uint8_t  csrc_count = 0;
+    const uint8_t  payload_type = 0x60;
+    const uint32_t ssrc = 0x11223344;
+
+    int pos = 0;
+    media_packet[pos++] = (rtp_version << 6) | (padding << 5) | (extension << 4) | csrc_count;
+    media_packet[pos++] = (marker << 1) | payload_type; 
+    big_endian_store_16(media_packet, pos, sequence_number);
+    pos += 2;
+    big_endian_store_32(media_packet, pos, timestamp);
+    pos += 4;
+    big_endian_store_32(media_packet, pos, ssrc); // only used for multicast
+    pos += 4;
+    return pos;
+}
+
+void avdtp_setup_sbc_media_payload_header(uint8_t * media_packet, uint8_t fragmentation, uint8_t starting_packet, uint8_t last_packet, uint8_t num_frames){
+    media_packet[0] =  (fragmentation << 7) | (starting_packet << 6) | (last_packet << 5) | num_frames;
+}
+
 void avdtp_initialize_stream_endpoint(avdtp_stream_endpoint_t * stream_endpoint){
     stream_endpoint->connection = NULL;
     stream_endpoint->state = AVDTP_STREAM_ENDPOINT_IDLE;

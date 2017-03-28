@@ -52,6 +52,9 @@
 extern "C" {
 #endif
 
+int avdtp_setup_media_packet_header(uint8_t * media_packet, uint32_t timestamp, uint16_t sequence_number, uint8_t marker);
+void avdtp_setup_sbc_media_payload_header(uint8_t * media_packet, uint8_t fragmentation, uint8_t starting_packet, uint8_t last_packet, uint8_t num_frames);
+
 avdtp_connection_t * avdtp_connection_for_bd_addr(bd_addr_t addr, avdtp_context_t * context);
 avdtp_connection_t * avdtp_connection_for_con_handle(hci_con_handle_t con_handle, avdtp_context_t * context);
 avdtp_connection_t * avdtp_connection_for_l2cap_signaling_cid(uint16_t l2cap_cid, avdtp_context_t * context);

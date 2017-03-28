@@ -438,52 +438,35 @@ void avdtp_packet_handler(uint8_t packet_type, uint16_t channel, uint8_t *packet
                         if (stream_endpoint->state == AVDTP_STREAM_ENDPOINT_STREAMING_W2_SEND){
                             stream_endpoint->state = AVDTP_STREAM_ENDPOINT_STREAMING;
                             //send sbc
-                            uint8_t  rtp_version = 2;
-                            uint8_t  padding = 0;
-                            uint8_t  extension = 0;
-                            uint8_t  csrc_count = 0;
-                            uint8_t  marker = 0;
-                            uint8_t  payload_type = 0x60;
-                            uint16_t sequence_number = stream_endpoint->sequence_number;
-                            uint32_t timestamp = btstack_run_loop_get_time_ms();
-                            uint32_t ssrc = 0x11223344;
-
+                            
                             // rtp header (min size 12B)
-                            int pos = 0;
                             int mtu = l2cap_get_remote_mtu_for_local_cid(stream_endpoint->l2cap_media_cid);
-
                             uint8_t media_packet[mtu];
-                            media_packet[pos++] = (rtp_version << 6) | (padding << 5) | (extension << 4) | csrc_count;
-                            media_packet[pos++] = (marker << 1) | payload_type; 
-                            big_endian_store_16(media_packet, pos, sequence_number);
-                            pos += 2;
-                            big_endian_store_32(media_packet, pos, timestamp);
-                            pos += 4;
-                            big_endian_store_32(media_packet, pos, ssrc); // only used for multicast
-                            pos += 4;
-                    
+
+                            int pos = avdtp_setup_media_packet_header(media_packet, btstack_run_loop_get_time_ms(), stream_endpoint->sequence_number, 0);
+
                             // media payload
                             // sbc_header (size 1B)
+                            int num_frames = 0;
                             uint8_t sbc_header_index = pos;
                             pos++;
-                            uint8_t fragmentation = 0;
-                            uint8_t starting_packet = 0; // set to 1 for the first packet of a fragmented SBC frame
-                            uint8_t last_packet = 0;     // set to 1 for the last packet of a fragmented SBC frame
-                            uint8_t num_frames = 0;
                             
                             uint32_t total_sbc_bytes_read = 0;
                             uint8_t  sbc_frame_size = 0;
                             // payload
                             while (mtu - 13 - total_sbc_bytes_read >= 120 && btstack_ring_buffer_bytes_available(&stream_endpoint->sbc_ring_buffer)){
                                 uint32_t number_of_bytes_read = 0;
+                                // read value of sbc_frame_size
                                 btstack_ring_buffer_read(&stream_endpoint->sbc_ring_buffer, &sbc_frame_size, 1, &number_of_bytes_read);
+                                // read sbc_frame_size bytes of payload
                                 btstack_ring_buffer_read(&stream_endpoint->sbc_ring_buffer, media_packet + pos, sbc_frame_size, &number_of_bytes_read); 
                                 pos += sbc_frame_size;
                                 total_sbc_bytes_read += sbc_frame_size;
                                 num_frames++;
                                 // printf("send sbc frame: timestamp %d, seq. nr %d\n", timestamp, stream_endpoint->sequence_number);
                             }
-                            media_packet[sbc_header_index] =  (fragmentation << 7) | (starting_packet << 6) | (last_packet << 5) | num_frames;
+                            avdtp_setup_sbc_media_payload_header(media_packet+sbc_header_index, 0, 0, 0, num_frames);
+
                             stream_endpoint->sequence_number++;
                             l2cap_send(stream_endpoint->l2cap_media_cid, media_packet, pos);
                             if (btstack_ring_buffer_bytes_available(&stream_endpoint->sbc_ring_buffer)){
