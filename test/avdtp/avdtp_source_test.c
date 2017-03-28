@@ -446,11 +446,11 @@ static  uint8_t media_sbc_codec_capabilities[] = {
     2, 53
 }; 
 
-static const uint8_t media_sbc_codec_reconfiguration[] = {
-    (AVDTP_SBC_44100 << 4) | AVDTP_SBC_STEREO,
-    (AVDTP_SBC_BLOCK_LENGTH_16 << 4) | (AVDTP_SBC_SUBBANDS_8 << 2) | AVDTP_SBC_ALLOCATION_METHOD_SNR,
-    2, 53
-}; 
+// static const uint8_t media_sbc_codec_reconfiguration[] = {
+//     (AVDTP_SBC_44100 << 4) | AVDTP_SBC_STEREO,
+//     (AVDTP_SBC_BLOCK_LENGTH_16 << 4) | (AVDTP_SBC_SUBBANDS_8 << 2) | AVDTP_SBC_ALLOCATION_METHOD_SNR,
+//     2, 53
+// }; 
 
 static void stdin_process(btstack_data_source_t *ds, btstack_data_source_callback_type_t callback_type){
     UNUSED(ds);
