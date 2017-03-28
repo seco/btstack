@@ -666,8 +666,14 @@ void avdtp_get_capabilities(uint16_t con_handle, uint8_t acp_seid, avdtp_context
         printf("avdtp_get_capabilities: no connection for handle 0x%02x found\n", con_handle);
         return;
     }
-    if (connection->state != AVDTP_SIGNALING_CONNECTION_OPENED) return;
-    if (connection->initiator_connection_state != AVDTP_SIGNALING_CONNECTION_INITIATOR_IDLE) return;
+    if (connection->state != AVDTP_SIGNALING_CONNECTION_OPENED) {
+        printf("avdtp_get_capabilities: signaling connection for handle 0x%02x not opened\n", con_handle);
+        return;
+    }
+    if (connection->initiator_connection_state != AVDTP_SIGNALING_CONNECTION_INITIATOR_IDLE){
+        printf("avdtp_get_capabilities: initiator connection state for handle 0x%02x not IDLE, current state %d\n", con_handle, connection->initiator_connection_state);
+        return;
+    } 
     connection->initiator_transaction_label++;
     connection->initiator_connection_state = AVDTP_SIGNALING_CONNECTION_INITIATOR_W2_GET_CAPABILITIES;
     connection->acp_seid = acp_seid;
