@@ -1,5 +1,5 @@
 # 
-# Makefile to download and convert .hex files from DA14581 HCI Firmware release
+# Makefile to convert .hex files from DA1458x HCI Firmware release
 #
 
 all:

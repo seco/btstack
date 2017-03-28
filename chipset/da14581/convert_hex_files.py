@@ -3,7 +3,7 @@
 
 # avr-objcopy -I ihex -O binary hci_581_active_uart.hex hci_581_active_uart.bin
 
-# requires InteHex package https://pypi.python.org/pypi/IntelHex
+# requires IntelHex package https://pypi.python.org/pypi/IntelHex
 # docs: http://python-intelhex.readthedocs.io/en/latest/
 
 from intelhex import IntelHex
@@ -48,9 +48,9 @@ def convert_hex(basename):
 	hex_name = basename + '.hex'
 	print ('Reading %s' % hex_name)
 	ih = IntelHex(hex_name)
-	f = open(basename + '.txt', 'w') # open file for writing
-	ih.dump(f)                    # dump to file object
-	f.close()                     # close file
+	# f = open(basename + '.txt', 'w') # open file for writing
+	# ih.dump(f)                    # dump to file object
+	# f.close()                     # close file
 	size = 	ih.maxaddr() - ih.minaddr() + 1
 	print '- Start: %x' % ih.minaddr()
 	print '- End:   %x' % ih.maxaddr()
@@ -80,4 +80,4 @@ if not files:
 # convert each of them
 for name in files:
 	basename = name.replace('.hex','')
-	convert_hex('hci_581_active_uart')
+	convert_hex(basename)
