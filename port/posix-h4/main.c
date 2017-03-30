@@ -227,36 +227,29 @@ static int safe_write(int fd, const void* buf, size_t len)
     return 0;
 }
 
-static int send_file(int ser_fd, int file_fd, int file_size, uint8_t* file_crc)
-{
+static int send_file(int ser_fd, int file_size, uint8_t* file_crc) {
     uint8_t fcrc = CRC_INIT;
-    int n, pos;
+    int pos;
 
     for (pos = 0; pos < file_size; ) {
         // printf("send pos %u\n", pos);
-#define FBUF_SIZE 4096
-        uint8_t buf[FBUF_SIZE];
-        int i, count;
+
+#define MAX_BLOCK_SIZE 256
+        int i, n;
 
         /* read a chunk */
-        count = file_size - pos;
-        if (count > FBUF_SIZE)
-            count = FBUF_SIZE;
-        n = read(file_fd, buf, count);
-        if (-1 == n) {
-            if (errno != EINTR) {
-                perror("reading from file");
-                return -1;
-            } else
-                continue;
+        n = file_size - pos;
+        if (n > MAX_BLOCK_SIZE){
+            n = MAX_BLOCK_SIZE;
         }
 
         /* update crc */
-        for (i = 0; i < n; i++)
-            fcrc ^= buf[i];
+        for (i = 0; i < n; i++){
+            fcrc ^= da14581_fw_data[pos+i];
+        }
 
         /* write chunk */
-        if (safe_write(ser_fd, buf, n) < 0) {
+        if (safe_write(ser_fd, &da14581_fw_data[pos], n) < 0) {
             perror("writing to serial port");
             return -1;
         }
@@ -268,26 +261,15 @@ static int send_file(int ser_fd, int file_fd, int file_size, uint8_t* file_crc)
     return 0;
 }
 
-static int dialog_download_hci_firmware(int fd)
-{
-    struct stat sbuf;
-    const char fw_fname[] = "hci-firmware.bin";
-    int cnt = 0, fw = -1, fw_size, res = -1, done = 0, download_state = 0;
+static int dialog_download_hci_firmware(int fd){
+
+    int cnt = 0;
+    int res = -1;
+    int done = 0;
+    int download_state = 0;
+
     int read_from_serial = 1;
-
-    /* open firmware file and get its size */
-    fw = open(fw_fname, O_RDONLY);
-    if (-1 == fw) {
-        perror(fw_fname);
-        exit(EXIT_FAILURE);
-    }
-    if (fstat(fw, &sbuf)) {
-        perror(fw_fname);
-        goto cleanup_and_exit;
-    }
-    fw_size = sbuf.st_size;
-
-    printf("Downloading %s...\n", fw_fname);
+    printf("Connect to DA14581..\n");
     uint8_t b = 0, fw_crc = 0;
 
     while (!done) {
@@ -297,7 +279,7 @@ static int dialog_download_hci_firmware(int fd)
 
             perror("Reading from serial port");
             continue;
-            // goto cleanup_and_exit;
+            // goto exit;
         }
 
         // printf("State %u, read 0x%02x\n", download_state, b);
@@ -308,11 +290,11 @@ static int dialog_download_hci_firmware(int fd)
                     uint8_t buf[3];
 
                     buf[0] = SOH;
-                    buf[1] = fw_size;
-                    buf[2] = (fw_size >> 8);
+                    buf[1] = da14581_fw_size;
+                    buf[2] = (da14581_fw_size >> 8);
                     if (safe_write(fd, buf, 3)) {
                         perror("responding to STX");
-                        goto cleanup_and_exit;
+                        goto exit;
                     }
                     download_state = 1;
                 }
@@ -326,12 +308,6 @@ static int dialog_download_hci_firmware(int fd)
                     fprintf(stderr, "Received NACK.\n");
                     done = 1;
                 } else {
-#if 0
-                    fprintf(stderr, "Received %02x while "
-                            "expecting ACK (%02x) "
-                            "or NACK (%02x).\n",
-                            b, ACK, NACK);
-#endif
                     if (++cnt == 10) {
                         printf("Restarting.\n");
                         download_state = 0;
@@ -341,9 +317,10 @@ static int dialog_download_hci_firmware(int fd)
                 break ;
 
             case 2:
+                printf("Downloading %s...\n", da14581_fw_name);
                 read_from_serial = 1;
-                if (send_file(fd, fw, fw_size, &fw_crc))
-                    goto cleanup_and_exit;
+                if (send_file(fd, da14581_fw_size, &fw_crc))
+                    goto exit;
                 download_state = 3;
                 break;
 
@@ -358,7 +335,7 @@ static int dialog_download_hci_firmware(int fd)
                     b = ACK;
                     if (safe_write(fd, &b, 1) < 0) {
                         perror("sending final ACK");
-                        goto cleanup_and_exit;
+                        goto exit;
                     }
                 }
                 done = 1;
@@ -367,18 +344,13 @@ static int dialog_download_hci_firmware(int fd)
             default:
                 fprintf(stderr, "Unknown download_state=%d\n",
                         download_state);
-                goto cleanup_and_exit;
+                goto exit;
         }
     }
 
     res = 0;
 
-cleanup_and_exit:
-    if (fw != -1) {
-        if (close(fw))
-            perror(fw_fname);
-    }
-
+exit:
     return res;
 }
 
@@ -449,7 +421,7 @@ int main(int argc, const char * argv[]){
     hci_dump_open("/tmp/hci_dump_da.pklg", HCI_DUMP_PACKETLOGGER);
 
     // pick serial port
-    config.device_name = "/dev/tty.usbmodem1411";
+    config.device_name = "/dev/tty.usbmodem1442311";
 
 #ifdef HAVE_DA14581
     btstack_chipset_da14581_download_firmware(config.device_name);
