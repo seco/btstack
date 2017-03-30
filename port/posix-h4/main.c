@@ -76,7 +76,7 @@ int is_bcm;
 
 int btstack_main(int argc, const char * argv[]);
 
-static hci_transport_config_uart_t config = {
+static hci_transport_config_uart_t transport_config = {
     HCI_TRANSPORT_CONFIG_UART,
     115200,
     0,  // main baudrate
@@ -131,13 +131,13 @@ void hal_led_toggle(void){
 static void use_fast_uart(void){
 #if defined(HAVE_POSIX_B240000_MAPPED_TO_3000000) || defined(HAVE_POSIX_B600_MAPPED_TO_3000000)
     printf("Using 3000000 baud.\n");
-    config.baudrate_main = 3000000;
+    transport_config.baudrate_main = 3000000;
 #elif defined(HAVE_POSIX_B1200_MAPPED_TO_2000000) || defined(HAVE_POSIX_B300_MAPPED_TO_2000000)
     printf("Using 2000000 baud.\n");
-    config.baudrate_main = 2000000;
+    transport_config.baudrate_main = 2000000;
 #else
     printf("Using 921600 baud.\n");
-    config.baudrate_main = 921600;
+    transport_config.baudrate_main = 921600;
 #endif
 }
 
@@ -194,7 +194,10 @@ static void local_version_information_callback(uint8_t * packet){
     }
 }
 
+// #define USE_BLOCK
+
 #ifdef HAVE_DA14581
+
 
 #include <unistd.h>
 #include <errno.h>
@@ -354,6 +357,11 @@ exit:
     return res;
 }
 
+#ifdef USE_BLOCK
+static btstack_uart_config_t uart_config;
+#endif
+
+#ifndef USE_BLOCK
 int btstack_chipset_da14581_download_firmware(const char * device_name){
 
     // open serial port
@@ -410,28 +418,30 @@ int btstack_chipset_da14581_download_firmware(const char * device_name){
     return 0;
 }
 #endif
+#endif
 
-int main(int argc, const char * argv[]){
+static void phase1(const btstack_uart_block_t * uart_driver, void (*done)(const btstack_uart_block_t * uart_driver, int argc, const char * argv[]), int argc, const char * argv[]){
 
-	/// GET STARTED with BTstack ///
-	btstack_memory_init();
-    btstack_run_loop_init(btstack_run_loop_posix_get_instance());
-	    
-    // use logger: format HCI_DUMP_PACKETLOGGER, HCI_DUMP_BLUEZ or HCI_DUMP_STDOUT
-    hci_dump_open("/tmp/hci_dump_da.pklg", HCI_DUMP_PACKETLOGGER);
+    printf("Phase 1: Download driver\n");
 
-    // pick serial port
-    config.device_name = "/dev/tty.usbmodem1442311";
+#ifndef USE_BLOCK
+    btstack_chipset_da14581_download_firmware(transport_config.device_name );
+    done(uart_driver, argc, argv);
+#else
+    // extract UART config from transport config
+    uart_config.baudrate    = transport_config.baudrate_init;
+    uart_config.flowcontrol = transport_config.flowcontrol;
+    uart_config.device_name = transport_config.device_name;
+    uart_driver->init(&uart_config);
+#endif
+}
 
-#ifdef HAVE_DA14581
-    btstack_chipset_da14581_download_firmware(config.device_name);
-#endif    
+static void phase2(const btstack_uart_block_t * uart_driver, int argc, const char * argv[]){
 
     // init HCI
-    const btstack_uart_block_t * uart_driver = btstack_uart_block_posix_instance();
     const hci_transport_t * transport = hci_transport_h4_instance(uart_driver);
     const btstack_link_key_db_t * link_key_db = btstack_link_key_db_fs_instance();
-	hci_init(transport, (void*) &config);
+    hci_init(transport, (void*) &transport_config);
     hci_set_link_key_db(link_key_db);
     
     // inform about BTstack state
@@ -446,9 +456,26 @@ int main(int argc, const char * argv[]){
 
     // setup app
     btstack_main(argc, argv);
+}
+
+int main(int argc, const char * argv[]){
+
+	/// GET STARTED with BTstack ///
+	btstack_memory_init();
+    btstack_run_loop_init(btstack_run_loop_posix_get_instance());
+	    
+    // use logger: format HCI_DUMP_PACKETLOGGER, HCI_DUMP_BLUEZ or HCI_DUMP_STDOUT
+    hci_dump_open("/tmp/hci_dump_da.pklg", HCI_DUMP_PACKETLOGGER);
+
+    // pick serial port and configure uart block driver
+    transport_config.device_name = "/dev/tty.usbmodem1442311";
+    const btstack_uart_block_t * uart_driver = btstack_uart_block_posix_instance();
+
+    // phase #1 download firmware
+    // phase #2 start main app
+    phase1(uart_driver, &phase2, argc, argv);
 
     // go
     btstack_run_loop_execute();    
-
     return 0;
 }
