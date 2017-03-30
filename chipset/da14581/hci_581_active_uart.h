@@ -10,5 +10,6 @@
 
 extern const uint8_t  da14581_fw_data[];
 extern const uint32_t da14581_fw_size;
+extern const char *   da14581_fw_name;
 
 #endif

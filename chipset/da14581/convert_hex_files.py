@@ -25,6 +25,7 @@ header = '''
 
 extern const uint8_t  da14581_fw_data[];
 extern const uint32_t da14581_fw_size;
+extern const char *   da14581_fw_name;
 
 #endif
 '''
@@ -35,6 +36,8 @@ code_start = '''
  */
 
 #include "BASENAME.h"
+
+const char *   da14581_fw_name = "BASENAME";
 
 const uint8_t  da14581_fw_data[] = {
 '''
