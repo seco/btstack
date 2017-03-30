@@ -6,6 +6,7 @@ CORE += \
 	btstack_chipset_bcm.c \
 	btstack_chipset_cc256x.c \
 	btstack_chipset_csr.c \
+	btstack_chipset_da14581.c \
 	btstack_chipset_em9301.c \
 	btstack_chipset_stlc2500d.c \
 	btstack_chipset_tc3566x.c \

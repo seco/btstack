@@ -62,15 +62,11 @@
 #include "btstack_chipset_bcm.h"
 #include "btstack_chipset_csr.h"
 #include "btstack_chipset_cc256x.h"
+#include "btstack_chipset_da14581.h"
 #include "btstack_chipset_em9301.h"
 #include "btstack_chipset_stlc2500d.h"
 #include "btstack_chipset_tc3566x.h"
-
-#define HAVE_DA14581
-
-#ifdef HAVE_DA14581
 #include "hci_581_active_uart.h"
-#endif
 
 int is_bcm;
 
@@ -194,249 +190,19 @@ static void local_version_information_callback(uint8_t * packet){
     }
 }
 
-// #define USE_BLOCK
-
-#ifdef HAVE_DA14581
-
-
-#include <unistd.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <termios.h>  /* POSIX terminal control definitions */
-
-//
-#define SOH         0x01
-#define STX         0x02
-#define ACK         0x06
-#define NACK        0x15
-#define CRC_INIT    0x00
-
-static int safe_write(int fd, const void* buf, size_t len)
-{
-    ssize_t n;
-
-    do {
-        n = write(fd, buf, len);
-        if (n > 0) {
-            // printf("Wrote %u from %u: ", (int) n, (int) len);
-            // printf_hexdump(buf, n);
-            len -= n;
-            buf += n;
-        } else if (n < 0  &&  (errno != EINTR && errno != EAGAIN))
-            return -1;
-    } while (len);
-
-    return 0;
-}
-
-static int send_file(int ser_fd, int file_size, uint8_t* file_crc) {
-    uint8_t fcrc = CRC_INIT;
-    int pos;
-
-    for (pos = 0; pos < file_size; ) {
-        // printf("send pos %u\n", pos);
-
-#define MAX_BLOCK_SIZE 256
-        int i, n;
-
-        /* read a chunk */
-        n = file_size - pos;
-        if (n > MAX_BLOCK_SIZE){
-            n = MAX_BLOCK_SIZE;
-        }
-
-        /* update crc */
-        for (i = 0; i < n; i++){
-            fcrc ^= da14581_fw_data[pos+i];
-        }
-
-        /* write chunk */
-        if (safe_write(ser_fd, &da14581_fw_data[pos], n) < 0) {
-            perror("writing to serial port");
-            return -1;
-        }
-
-        pos += n;
-    }
-
-    *file_crc = fcrc;
-    return 0;
-}
-
-static int dialog_download_hci_firmware(int fd){
-
-    int cnt = 0;
-    int res = -1;
-    int done = 0;
-    int download_state = 0;
-
-    int read_from_serial = 1;
-    printf("Connect to DA14581..\n");
-    uint8_t b = 0, fw_crc = 0;
-
-    while (!done) {
-
-        if (read_from_serial && read(fd, &b, 1) < 0) {
-            if (errno == EAGAIN) continue;
-
-            perror("Reading from serial port");
-            continue;
-            // goto exit;
-        }
-
-        // printf("State %u, read 0x%02x\n", download_state, b);
-        switch (download_state)
-        {
-            case 0:
-                if (STX == b) {
-                    uint8_t buf[3];
-
-                    buf[0] = SOH;
-                    buf[1] = da14581_fw_size;
-                    buf[2] = (da14581_fw_size >> 8);
-                    if (safe_write(fd, buf, 3)) {
-                        perror("responding to STX");
-                        goto exit;
-                    }
-                    download_state = 1;
-                }
-                break ;
-
-            case 1:
-                if (ACK == b) {
-                    download_state = 2;
-                    read_from_serial = 0;
-                } else if (NACK == b) {
-                    fprintf(stderr, "Received NACK.\n");
-                    done = 1;
-                } else {
-                    if (++cnt == 10) {
-                        printf("Restarting.\n");
-                        download_state = 0;
-                        cnt = 0;
-                    }
-                }
-                break ;
-
-            case 2:
-                printf("Downloading %s...\n", da14581_fw_name);
-                read_from_serial = 1;
-                if (send_file(fd, da14581_fw_size, &fw_crc))
-                    goto exit;
-                download_state = 3;
-                break;
-
-            case 3:
-                if (fw_crc != b) {
-                    fprintf(stderr, "Received CRC %02x, "
-                            "which does not match "
-                            "computed CRC %02x.\n",
-                            b, fw_crc);
-                } else {
-                    printf("CRC OK (%02x).\n", b);
-                    b = ACK;
-                    if (safe_write(fd, &b, 1) < 0) {
-                        perror("sending final ACK");
-                        goto exit;
-                    }
-                }
-                done = 1;
-                break;
-
-            default:
-                fprintf(stderr, "Unknown download_state=%d\n",
-                        download_state);
-                goto exit;
-        }
-    }
-
-    res = 0;
-
-exit:
-    return res;
-}
-
-#ifdef USE_BLOCK
+static int main_argc;
+static const char ** main_argv;
+static const btstack_uart_block_t * uart_driver;
 static btstack_uart_config_t uart_config;
-#endif
 
-#ifndef USE_BLOCK
-int btstack_chipset_da14581_download_firmware(const char * device_name){
+static void phase2(int status){
 
-    // open serial port
-    int flowcontrol = 1;
-
-    struct termios toptions;
-    int flags = O_RDWR | O_NOCTTY | O_NONBLOCK;
-    int fd = open(device_name, flags);
-    if (fd == -1)  {
-        log_error("posix_open: Unable to open port %s", device_name);
-        return -1;
-    }
-    
-    if (tcgetattr(fd, &toptions) < 0) {
-        log_error("posix_open: Couldn't get term attributes");
-        return -1;
-    }
-    
-    cfmakeraw(&toptions);   // make raw
-
-    // 8N1
-    toptions.c_cflag &= ~CSTOPB;
-    toptions.c_cflag |= CS8;
-    if (flowcontrol) {
-        // with flow control
-        toptions.c_cflag |= CRTSCTS;
-    } else {
-        // no flow control
-        toptions.c_cflag &= ~CRTSCTS;
-    }
-    
-    toptions.c_cflag |= CREAD | CLOCAL;  // turn on READ & ignore ctrl lines
-    toptions.c_iflag &= ~(IXON | IXOFF | IXANY); // turn off s/w flow ctrl
-    
-    // see: http://unixwiz.net/techtips/termios-vmin-vtime.html
-    toptions.c_cc[VMIN]  = 1;
-    toptions.c_cc[VTIME] = 0;
-    
-    speed_t brate = B57600;
-    cfsetospeed(&toptions, brate);
-    cfsetispeed(&toptions, brate);
-
-    if(tcsetattr(fd, TCSANOW, &toptions) < 0) {
-        log_error("posix_open: Couldn't set term attributes");
-        return -1;
+    if (status){
+        printf("Download firmware failed\n");
+        return;
     }
 
-    tcflush(fd,TCIOFLUSH);
-    
-    dialog_download_hci_firmware(fd);
-
-    close(fd);
-
-    return 0;
-}
-#endif
-#endif
-
-static void phase1(const btstack_uart_block_t * uart_driver, void (*done)(const btstack_uart_block_t * uart_driver, int argc, const char * argv[]), int argc, const char * argv[]){
-
-    printf("Phase 1: Download driver\n");
-
-#ifndef USE_BLOCK
-    btstack_chipset_da14581_download_firmware(transport_config.device_name );
-    done(uart_driver, argc, argv);
-#else
-    // extract UART config from transport config
-    uart_config.baudrate    = transport_config.baudrate_init;
-    uart_config.flowcontrol = transport_config.flowcontrol;
-    uart_config.device_name = transport_config.device_name;
-    uart_driver->init(&uart_config);
-#endif
-}
-
-static void phase2(const btstack_uart_block_t * uart_driver, int argc, const char * argv[]){
+    printf("Phase 2: Main app\n");
 
     // init HCI
     const hci_transport_t * transport = hci_transport_h4_instance(uart_driver);
@@ -455,8 +221,9 @@ static void phase2(const btstack_uart_block_t * uart_driver, int argc, const cha
     signal(SIGINT, sigint_handler);
 
     // setup app
-    btstack_main(argc, argv);
+    btstack_main(main_argc, main_argv);
 }
+
 
 int main(int argc, const char * argv[]){
 
@@ -465,15 +232,26 @@ int main(int argc, const char * argv[]){
     btstack_run_loop_init(btstack_run_loop_posix_get_instance());
 	    
     // use logger: format HCI_DUMP_PACKETLOGGER, HCI_DUMP_BLUEZ or HCI_DUMP_STDOUT
-    hci_dump_open("/tmp/hci_dump_da.pklg", HCI_DUMP_PACKETLOGGER);
+    hci_dump_open("/tmp/hci_dump.pklg", HCI_DUMP_PACKETLOGGER);
 
     // pick serial port and configure uart block driver
     transport_config.device_name = "/dev/tty.usbmodem1442311";
-    const btstack_uart_block_t * uart_driver = btstack_uart_block_posix_instance();
+    uart_driver = btstack_uart_block_posix_instance();
+
+    // extract UART config from transport config, but overide initial uart speed
+    uart_config.baudrate    = 57600;
+    uart_config.flowcontrol = transport_config.flowcontrol;
+    uart_config.device_name = transport_config.device_name;
+    uart_driver->init(&uart_config);
+
+    main_argc = argc;
+    main_argv = argv;
 
     // phase #1 download firmware
+    printf("Phase 1: Download firmware\n");
+
     // phase #2 start main app
-    phase1(uart_driver, &phase2, argc, argv);
+    btstack_chipset_da14581_download_firmware(uart_driver, da14581_fw_data, da14581_fw_size, &phase2);
 
     // go
     btstack_run_loop_execute();    
